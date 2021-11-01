@@ -1,6 +1,7 @@
 """ rates demo """
 
+from rates_demo.sequences_demo import run_demo
+
 if __name__ == "__main__":
-    print("Hello, World!")
 
-
+    run_demo()
