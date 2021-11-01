@@ -1,2 +1,5 @@
-prep
+venv
+__pycache__
 .DS_Store
+*.pyc
+.mypy_cache
