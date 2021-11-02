@@ -104,3 +104,12 @@ def start_rates_api() -> None:
 
     app.run()
 
+
+if __name__ == "__main__":
+    print("__name__ ", __name__)
+    print("running module")
+    start_rates_api()
+else:
+    print("__name__ ", __name__)
+    print("importing module")
+
