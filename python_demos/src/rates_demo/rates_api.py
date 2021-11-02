@@ -4,7 +4,7 @@ from typing import Any
 import pathlib
 import csv
 import math
-from flask import Flask, Response, request
+from flask import Flask, Response, request, jsonify, abort
 
 rates: list[dict[str,Any]] = []
 
@@ -31,13 +31,23 @@ def rates_by_date(rate_date: str) -> Response:
                 country_symbols = request.args["symbols"].split(",")
             else:
                 country_symbols = [ col for col in rate if col != "Date"]
+
+            country_rates = {
+                country_code: country_rate / rate[base_country]
+                for (country_code, country_rate) in rate.items()
+                if country_code != "Date" and
+                country_code in country_symbols and
+                not math.isnan(country_rate)
+            }
+
+            return jsonify({
+                "date": rate["Date"],
+                "base": base_country,
+                "rates": country_rates
+            })
+
+    abort(404)
             
-            
-
-
-
-
-
 
 """
 
