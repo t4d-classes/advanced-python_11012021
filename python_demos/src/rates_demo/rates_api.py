@@ -4,6 +4,7 @@ from typing import Any
 import pathlib
 import csv
 import math
+import time
 from flask import Flask, Response, request, jsonify, abort
 
 rates: list[dict[str,Any]] = []
@@ -20,6 +21,8 @@ def check() -> Response:
 @app.route("/api/<rate_date>")
 def rates_by_date(rate_date: str) -> Response:
     """ rates_by_date """
+
+    time.sleep(1)
 
     for rate in rates:
 
