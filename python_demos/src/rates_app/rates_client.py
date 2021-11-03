@@ -19,10 +19,9 @@ try:
 
             if command == "exit":
                 break
-
-            socket_client.sendall(command.encode('UTF-8'))
-
-            print(socket_client.recv(2048).decode('UTF-8')) 
+            else:
+                socket_client.sendall(command.encode('UTF-8'))
+                print(socket_client.recv(2048).decode('UTF-8')) 
 
 except ConnectionResetError:
     print("Server connection was closed.")
