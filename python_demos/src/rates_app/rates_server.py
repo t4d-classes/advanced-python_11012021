@@ -3,34 +3,47 @@
 from typing import Optional
 import multiprocessing as mp
 import sys
+import socket
 
 
-def rate_server() -> None:
+def rate_server(host: str, port: int) -> None:
     """rate server"""
 
-    # implement socket server
-    # the host and port should be received as parameters into this function
+    with socket.socket(
+        socket.AF_INET, socket.SOCK_STREAM) as socket_server:
 
-    # - use "AF_INET" for IPv4
-    # - use "SOCK_STREAM" for TCP
+        socket_server.bind( (host, port) )
+        socket_server.listen()
 
-    # when a client connects, send the following string:
-    #     "Connected to the Rate Server"
+        while True:
 
-    # wire up an echo server which receives a string and echos back to
-    # the client the string that is received
+            conn, _ = socket_server.accept()
 
-    while True:
-        pass
+            conn.sendall(b"Connected to the Rate Server")
+
+            try: 
+
+                while True:
+                    message = conn.recv(2048).decode('UTF-8')
+                    
+                    if message == "exit":
+                        conn.close()
+                        break
+                    
+                    conn.sendall(message.encode('UTF-8'))
+
+            except ConnectionResetError:
+                break
 
 
-def command_start_server(server_process: Optional[mp.Process]) -> mp.Process:
+def command_start_server(
+    server_process: Optional[mp.Process], host: str, port: int) -> mp.Process:
     """ command start server """
 
     if server_process and server_process.is_alive():
         print("server is already running")
     else:
-        server_process = mp.Process(target=rate_server)
+        server_process = mp.Process(target=rate_server, args=(host, port))
         server_process.start()
         print("server started")
 
@@ -50,7 +63,6 @@ def command_stop_server(
     server_process = None
 
     return server_process
-    
 
 def command_server_status(server_process: Optional[mp.Process]) -> None:
     """ output the status of the server """
@@ -74,17 +86,17 @@ def main() -> None:
     try:
 
         server_process: Optional[mp.Process] = None
-
-        # define the host and port variables here
-        # host: 127.0.0.1
-        # port: 5050
+        
+        host = "127.0.0.1"
+        port = 5050
 
         while True:
 
             command = input("> ")
 
             if command == "start":
-                server_process = command_start_server(server_process)
+                server_process = command_start_server(
+                    server_process, host, port)
             elif command == "stop":
                 server_process = command_stop_server(server_process)
             elif command == "status":

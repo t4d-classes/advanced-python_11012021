@@ -18,5 +18,6 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as socket_client:
             break
         else:
             socket_client.sendall(command.encode('UTF-8'))
+            socket_client.send(command.encode('UTF-8'))
             print(socket_client.recv(2048).decode('UTF-8'))
 
