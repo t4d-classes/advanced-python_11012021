@@ -18,31 +18,21 @@ CLIENT_COMMAND_PARTS = [
 
 CLIENT_COMMAND_REGEX = re.compile("".join(CLIENT_COMMAND_PARTS))
 
-# Add support for the following client command
+# Task 1 - Cache Rate Results
 
-# GET 2019-01-03 EUR
+# Upgrade the application to check the database for a given exchange rate
+# (date, currency)
 
-# GET is the command name
-# 2019-01-03 is the date of the current rates to retrieve
-# EUR is the currency symbol to retrieve, DO NOT USE USD
+# If the exchange rate was previously retrieved and stored in the
+# database (inside the rates table), then return it
 
-# Call the Rates API using the USD as the base to get the currency rate
-# for the specified year
+# If the exchange rate is not in the database, then download it, add it to
+# the database and return it
 
-# Ideally your code will do the following:
+# Task 2 - Clear Rate Cache
 
-# 1. Use a regular expression with named capture groups to extract parts
-# of the command
-
-# 2. Add a function named "process_client_command" to
-# "ClientConnectionThread" that will process the parsed command including
-# calling the API, extracting the API response, and send back the rate
-# value to the client
-
-# Data comes back as JSON
-
-# *3. Send back an error message for an incorrectly formatted command or an
-# unsupported command name (only the GET command is supported)
+# Add a command for clearing the rate cache from the server command
+# prompt. Name the command "clear".
 
 class ClientConnectionThread(threading.Thread):
     """ client connection thread """
