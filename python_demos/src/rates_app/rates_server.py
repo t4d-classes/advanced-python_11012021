@@ -1,6 +1,7 @@
 """ rate server module """
 
 from typing import Optional
+from multiprocessing.sharedctypes import Synchronized
 import multiprocessing as mp
 import sys
 import socket
@@ -18,24 +19,36 @@ class ClientConnectionThread(threading.Thread):
 
     def __init__(
         self,
-        conn: socket.socket) -> None:
+        conn: socket.socket,
+        client_count: Synchronized) -> None:
 
         threading.Thread.__init__(self)
         self.conn = conn
+        self.client_count = client_count
 
     def run(self) -> None:
 
-        self.conn.sendall(b"Connected to the Rate Server")
+        try:
 
-        while True:
-            message = self.conn.recv(2048)
-            if not message:
-                break
-            self.conn.sendall(message)
+            self.conn.sendall(b"Connected to the Rate Server")
+
+            while True:
+                message = self.conn.recv(2048)
+                if not message:
+                    break
+                self.conn.sendall(message)
+
+        except ConnectionAbortedError:
+            pass
+            # ...
+
+        finally:
+            with self.client_count.get_lock():
+                self.client_count.value -= 1
 
 
 
-def rate_server(host: str, port: int) -> None:
+def rate_server(host: str, port: int, client_count: Synchronized) -> None:
     """rate server"""
 
     with socket.socket(
@@ -48,18 +61,24 @@ def rate_server(host: str, port: int) -> None:
 
             conn, _ = socket_server.accept()
 
-            client_con_thread = ClientConnectionThread(conn)
+            with client_count.get_lock():
+                client_count.value += 1
+
+            client_con_thread = ClientConnectionThread(conn, client_count)
             client_con_thread.start()
 
 
 def command_start_server(
-    server_process: Optional[mp.Process], host: str, port: int) -> mp.Process:
+    server_process: Optional[mp.Process],
+    host: str, port: int,
+    client_count: Synchronized) -> mp.Process:
     """ command start server """
 
     if server_process and server_process.is_alive():
         print("server is already running")
     else:
-        server_process = mp.Process(target=rate_server, args=(host, port))
+        server_process = mp.Process(
+            target=rate_server, args=(host, port, client_count))
         server_process.start()
         print("server started")
 
@@ -89,6 +108,11 @@ def command_server_status(server_process: Optional[mp.Process]) -> None:
     else:
         print("server is stopped")
 
+def command_count(client_count: Synchronized) -> None:
+    """ exit the rates server app """
+
+    print(client_count.value)
+
 def command_exit(server_process: Optional[mp.Process]) -> None:
     """ exit the rates server app """
 
@@ -101,6 +125,7 @@ def main() -> None:
 
     try:
 
+        client_count: Synchronized = mp.Value('i', 0)
         server_process: Optional[mp.Process] = None
         
         host = "127.0.0.1"
@@ -112,9 +137,11 @@ def main() -> None:
 
             if command == "start":
                 server_process = command_start_server(
-                    server_process, host, port)
+                    server_process, host, port, client_count)
             elif command == "stop":
                 server_process = command_stop_server(server_process)
+            elif command == "count":
+                command_count(client_count)
             elif command == "status":
                 command_server_status(server_process)
             elif command == "exit":
