@@ -1,11 +1,22 @@
 """ rate server module """
 
-from typing import Optional
+from typing import Optional, Any
 from multiprocessing.sharedctypes import Synchronized
 import multiprocessing as mp
 import sys
 import socket
 import threading
+import re
+import json
+import requests
+
+CLIENT_COMMAND_PARTS = [
+    r"^(?P<name>[A-Z]*) ",
+    r"(?P<date>[0-9]{4}-[0-9]{2}-[0-9]{2}) ",
+    r"(?P<symbol>[A-Z]{3})$"
+]
+
+CLIENT_COMMAND_REGEX = re.compile("".join(CLIENT_COMMAND_PARTS))
 
 # Add support for the following client command
 
@@ -52,10 +63,22 @@ class ClientConnectionThread(threading.Thread):
             self.conn.sendall(b"Connected to the Rate Server")
 
             while True:
-                message = self.conn.recv(2048)
-                if not message:
+                data = self.conn.recv(2048)
+
+                if not data:
                     break
-                self.conn.sendall(message)
+
+                client_command_str: str = data.decode("UTF-8")
+
+                client_command_match = CLIENT_COMMAND_REGEX.match(
+                    client_command_str
+                )
+
+                if not client_command_match:
+                    self.conn.sendall(b"Invalid Command Format")
+                else:
+                    self.process_client_command(
+                        client_command_match.groupdict())
 
         except ConnectionAbortedError:
             pass
@@ -64,6 +87,31 @@ class ClientConnectionThread(threading.Thread):
         finally:
             with self.client_count.get_lock():
                 self.client_count.value -= 1
+    
+    def process_client_command(self, client_command: dict[str, Any]) -> None:
+        """ process client command """
+
+        if client_command["name"] == "GET":
+
+            url = "".join([
+                "http://localhost:5000/api/",
+                client_command["date"],
+                "?base=USD&symbols=",
+                client_command["symbol"]
+            ])
+
+            response = requests.get(url)
+
+            # rate_data = json.loads(response.text)
+            rate_data = response.json()
+
+            self.conn.sendall(
+                str(rate_data["rates"][client_command["symbol"]])
+                .encode("UTF-8")
+            )
+
+        else:
+            self.conn.sendall(b"Invalid Command Name")
 
 
 
