@@ -1,3 +1,5 @@
+""" conn info """
+
 docker_conn_options = [
     "DRIVER={ODBC Driver 17 for SQL Server}",
     "SERVER=localhost,1433",
@@ -5,3 +7,5 @@ docker_conn_options = [
     "UID=sa",
     "PWD=sqlDbp@ss!",
 ]
+
+conn_string = ";".join(docker_conn_options)
