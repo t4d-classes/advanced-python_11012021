@@ -9,6 +9,17 @@ import threading
 import re
 import json
 import requests
+import pyodbc
+
+docker_conn_options = [
+    "DRIVER={ODBC Driver 17 for SQL Server}",
+    "SERVER=localhost,1433",
+    "DATABASE=ratesapp",
+    "UID=sa",
+    "PWD=sqlDbp@ss!",
+]
+
+conn_string = ";".join(docker_conn_options)
 
 CLIENT_COMMAND_PARTS = [
     r"^(?P<name>[A-Z]*) ",
@@ -83,22 +94,54 @@ class ClientConnectionThread(threading.Thread):
 
         if client_command["name"] == "GET":
 
-            url = "".join([
-                "http://localhost:5000/api/",
-                client_command["date"],
-                "?base=USD&symbols=",
-                client_command["symbol"]
-            ])
+            with pyodbc.connect(conn_string) as con:
 
-            response = requests.get(url)
+                closing_date = client_command["date"]
+                currency_symbol = client_command["symbol"]
 
-            # rate_data = json.loads(response.text)
-            rate_data = response.json()
+                rate_sql = " ".join([
+                    "select exchangerate as exchange_rate from rates",
+                    "where closingdate = ? and currencysymbol = ?"
+                ])
 
-            self.conn.sendall(
-                str(rate_data["rates"][client_command["symbol"]])
-                .encode("UTF-8")
-            )
+                with con.cursor() as cur:
+
+                    cur.execute(rate_sql, (closing_date, currency_symbol))
+
+                    rate = cur.fetchone()
+
+                    if rate:
+                        self.conn.sendall(
+                            str(rate.exchange_rate).encode("UTF-8")
+                        )
+                        return
+
+                url = "".join([
+                    "http://localhost:5000/api/",
+                    client_command["date"],
+                    "?base=USD&symbols=",
+                    client_command["symbol"]
+                ])
+
+                response = requests.get(url)
+
+                # rate_data = json.loads(response.text)
+                rate_data = response.json()
+
+                exchange_rate = rate_data["rates"][client_command["symbol"]]
+
+                insert_rate_sql = " ".join([
+                    "insert into rates",
+                    "(closingdate, exchangerate, currencysymbol)"
+                    "values (?, ?, ?)"
+                ])
+
+                con.execute(insert_rate_sql,
+                    (closing_date, exchange_rate, currency_symbol))
+
+                self.conn.sendall(
+                    str(exchange_rate).encode("UTF-8")
+                )
 
         else:
             self.conn.sendall(b"Invalid Command Name")
@@ -170,6 +213,15 @@ def command_count(client_count: Synchronized) -> None:
 
     print(client_count.value)
 
+def command_clear_cache() -> None:
+    """ command clear cache """
+
+    with pyodbc.connect(conn_string) as con:
+        con.execute("delete from rates")
+
+    print("cache cleared")
+
+
 def command_exit(server_process: Optional[mp.Process]) -> None:
     """ exit the rates server app """
 
@@ -199,6 +251,8 @@ def main() -> None:
                 server_process = command_stop_server(server_process)
             elif command == "count":
                 command_count(client_count)
+            elif command == "clear":
+                command_clear_cache()
             elif command == "status":
                 command_server_status(server_process)
             elif command == "exit":
