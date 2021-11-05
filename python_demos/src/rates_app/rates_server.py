@@ -11,13 +11,24 @@ import requests
 import pyodbc
 from datetime import datetime, date
 from decimal import Decimal
+import yaml
+import pathlib
+import csv
+
+def read_config() -> Any:
+    """ read config """
+
+    with open(pathlib.Path("config", "rates_config.yaml")) as yaml_file:
+        return yaml.load(yaml_file, Loader=yaml.SafeLoader)
+
+config = read_config()
 
 docker_conn_options = [
     "DRIVER={ODBC Driver 17 for SQL Server}",
-    "SERVER=localhost,1433",
-    "DATABASE=ratesapp",
-    "UID=sa",
-    "PWD=sqlDbp@ss!",
+    f"SERVER={config['database']['server']}",
+    f"DATABASE={config['database']['database']}",
+    f"UID={config['database']['username']}",
+    f"PWD={config['database']['password']}",
 ]
 
 conn_string = ";".join(docker_conn_options)
@@ -31,6 +42,18 @@ CLIENT_COMMAND_PARTS = [
 CLIENT_COMMAND_REGEX = re.compile("".join(CLIENT_COMMAND_PARTS))
 
 CURRENCY_SYMBOLS_REGEX = re.compile(r"[,:;|]")
+
+
+
+
+def log_client_event(thread_id: Optional[int], host: str, port: int, msg: str):
+
+    with open(pathlib.Path("logs", "server_log.csv"),
+        "a", newline="\n") as csv_file:
+
+        csv_writer = csv.writer(csv_file)
+        csv_writer.writerow((thread_id, datetime.now(), host, port, msg))
+
 
 def get_rate_from_api(closing_date: date, currency_symbol: str,
                       currency_rates: list[tuple[date, str, Decimal]]) -> None:
@@ -192,13 +215,19 @@ def rate_server(host: str, port: int, client_count: Synchronized) -> None:
 
         while True:
 
-            conn, _ = socket_server.accept()
+            conn, addr = socket_server.accept()
 
             with client_count.get_lock():
                 client_count.value += 1
 
             client_con_thread = ClientConnectionThread(conn, client_count)
             client_con_thread.start()
+
+            log_client_event(
+                client_con_thread.ident,
+                addr[0],
+                addr[1],
+                "connect")
 
 
 def command_start_server(
@@ -270,8 +299,8 @@ def main() -> None:
         client_count: Synchronized = mp.Value('i', 0)
         server_process: Optional[mp.Process] = None
         
-        host = "127.0.0.1"
-        port = 5050
+        host = config['server']['host']
+        port = int(config['server']['port'])
 
         while True:
 
