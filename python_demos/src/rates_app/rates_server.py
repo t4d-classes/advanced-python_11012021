@@ -7,9 +7,10 @@ import sys
 import socket
 import threading
 import re
-import json
 import requests
 import pyodbc
+from datetime import datetime, date
+from decimal import Decimal
 
 docker_conn_options = [
     "DRIVER={ODBC Driver 17 for SQL Server}",
@@ -24,26 +25,32 @@ conn_string = ";".join(docker_conn_options)
 CLIENT_COMMAND_PARTS = [
     r"^(?P<name>[A-Z]*) ",
     r"(?P<date>[0-9]{4}-[0-9]{2}-[0-9]{2}) ",
-    r"(?P<symbol>[A-Z]{3})$"
+    r"(?P<symbol>[A-Z,:;|]*)$"
 ]
 
 CLIENT_COMMAND_REGEX = re.compile("".join(CLIENT_COMMAND_PARTS))
 
-# Task 1 - Cache Rate Results
+CURRENCY_SYMBOLS_REGEX = re.compile(r"[,:;|]")
 
-# Upgrade the application to check the database for a given exchange rate
-# (date, currency)
+def get_rate_from_api(closing_date: date, currency_symbol: str,
+                      currency_rates: list[tuple[date, str, Decimal]]) -> None:
+    """ get rate from api """
 
-# If the exchange rate was previously retrieved and stored in the
-# database (inside the rates table), then return it
+    url = "".join([
+        "http://localhost:5000/api/",
+        closing_date.strftime("%Y-%m-%d"),
+        "?base=USD&symbols=",
+        currency_symbol,
+    ])
 
-# If the exchange rate is not in the database, then download it, add it to
-# the database and return it
+    response = requests.get(url)
+    rate_data = response.json()
 
-# Task 2 - Clear Rate Cache
+    currency_rates.append(
+        (closing_date,
+         currency_symbol,
+         Decimal(str(rate_data["rates"][currency_symbol]))))
 
-# Add a command for clearing the rate cache from the server command
-# prompt. Name the command "clear".
 
 class ClientConnectionThread(threading.Thread):
     """ client connection thread """
@@ -81,9 +88,14 @@ class ClientConnectionThread(threading.Thread):
                     self.process_client_command(
                         client_command_match.groupdict())
 
-        except ConnectionAbortedError:
+        # except ConnectionAbortedError:
+        #     pass
+
+        # except OSError:
+        #     pass
+
+        except:
             pass
-            # ...
 
         finally:
             with self.client_count.get_lock():
@@ -96,52 +108,73 @@ class ClientConnectionThread(threading.Thread):
 
             with pyodbc.connect(conn_string) as con:
 
-                closing_date = client_command["date"]
-                currency_symbol = client_command["symbol"]
+                closing_date = datetime.strptime(
+                    client_command["date"], "%Y-%m-%d")
+
+                currency_symbols = CURRENCY_SYMBOLS_REGEX.split(
+                    client_command["symbol"])
+
+                rate_sql_params: list[Any] = [closing_date]
+                rate_sql_params.extend(currency_symbols)
+
+                placeholders = ",".join("?" * len(currency_symbols))
 
                 rate_sql = " ".join([
-                    "select exchangerate as exchange_rate from rates",
-                    "where closingdate = ? and currencysymbol = ?"
+                    "select exchangerate as exchange_rate,"
+                    "currencysymbol as currency_symbol from rates",
+                    "where closingdate = ? and "
+                    f"currencysymbol in ({placeholders})"
                 ])
+
+                cached_currency_symbols: set[str] = set()
+
+                rate_responses = []
 
                 with con.cursor() as cur:
 
-                    cur.execute(rate_sql, (closing_date, currency_symbol))
+                    for rate in cur.execute(rate_sql, rate_sql_params):
+                        cached_currency_symbols.add(rate.currency_symbol)
+                        rate_responses.append(
+                            f"{rate.currency_symbol}: {rate.exchange_rate}")
 
-                    rate = cur.fetchone()
+                currency_rate_threads: list[threading.Thread] = []
+                currency_rates: list[tuple[date, str, Decimal]] = []
 
-                    if rate:
-                        self.conn.sendall(
-                            str(rate.exchange_rate).encode("UTF-8")
-                        )
-                        return
+                for currency_symbol in currency_symbols:
+                    if currency_symbol not in cached_currency_symbols:
 
-                url = "".join([
-                    "http://localhost:5000/api/",
-                    client_command["date"],
-                    "?base=USD&symbols=",
-                    client_command["symbol"]
-                ])
+                        currency_rate_thread = threading.Thread(
+                            target=get_rate_from_api,
+                            args=(closing_date,
+                                  currency_symbol, currency_rates))
 
-                response = requests.get(url)
+                        currency_rate_thread.start()
+                        currency_rate_threads.append(currency_rate_thread)
 
-                # rate_data = json.loads(response.text)
-                rate_data = response.json()
+                for currency_rate_thread in currency_rate_threads:
+                    currency_rate_thread.join()
 
-                exchange_rate = rate_data["rates"][client_command["symbol"]]
+                if len(currency_rates) > 0:
 
-                insert_rate_sql = " ".join([
-                    "insert into rates",
-                    "(closingdate, exchangerate, currencysymbol)"
-                    "values (?, ?, ?)"
-                ])
+                    with con.cursor() as cur:
 
-                con.execute(insert_rate_sql,
-                    (closing_date, exchange_rate, currency_symbol))
+                        sql = " ".join([
+                            "insert into rates",
+                            "(closingdate, currencysymbol, exchangerate)",
+                            "values",
+                            "(?, ?, ?)",
+                        ])
+
+                        cur.executemany(sql, currency_rates)
+
+                    for currency in currency_rates:
+                        rate_responses.append(
+                            f"{currency[1]}: {currency[2]}")
+
+
 
                 self.conn.sendall(
-                    str(exchange_rate).encode("UTF-8")
-                )
+                    "\n".join(rate_responses).encode("UTF-8"))
 
         else:
             self.conn.sendall(b"Invalid Command Name")
